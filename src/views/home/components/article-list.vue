@@ -14,7 +14,11 @@
   :error.sync="error"
   error-text="请求失败，点击重新加载"
 >
-  <article-item v-for="(item,index) in list" :key="index" :article="item"></article-item>
+    <article-item
+    v-for="(item,index) in list"
+    :key="index"
+    :article="item"
+  />
   </van-list>
   </van-pull-refresh>
   </div>

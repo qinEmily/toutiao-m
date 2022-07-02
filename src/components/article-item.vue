@@ -1,7 +1,14 @@
 <template>
   <div class="article-item">
     <van-cell-group>
-      <van-cell>
+      <!-- 通过路由的形式实现点击跳转到文章详情页 -->
+      <van-cell
+      :to="{
+      name:'article',
+      params:{
+        articleId:this.article.art_id
+        }
+      }">
         <div class="title van-multi-ellipsis--l2" slot="title">
           {{article.title}}
         </div>
