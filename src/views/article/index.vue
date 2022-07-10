@@ -36,25 +36,86 @@
           />
           <div slot="title" class="user-name">{{article.aut_name}}</div>
           <div slot="label" class="publish-date">{{article.pubdate | relativeTime}}</div>
-          <van-button
+          <!-- +关注or已关注 -->
+          <follow-user
+          :is_followed="article.is_followed"
+          :aut_id="article.aut_id"
+          @update-follow-user="article.is_followed = $event"
+          ></follow-user>
+          <!-- <van-button
             class="follow-btn"
             type="info"
             color="#3296fa"
             round
             size="small"
             icon="plus"
+            v-if="!article.is_followed"
+            @click="onFollow"
+            :loading="isFollowLoading"
           >关注</van-button>
-          <!-- <van-button
+          <van-button
             class="follow-btn"
             round
             size="small"
+            v-else
+            @click="onFollow"
+            :loading="isFollowLoading"
           >已关注</van-button> -->
+          <!--/+关注or已关注(已封装到单独组件) -->
         </van-cell>
         <!-- /用户信息 -->
 
         <!-- 文章内容 -->
-        <div class="article-content" v-html="article.content"></div>
+        <div class="article-content markdown-body" v-html="article.content" ref="article-content"></div>
         <van-divider>正文结束</van-divider>
+        <!-- 评论区 -->
+        <CommentList
+        :source="article.art_id"
+        :list ="commentList"
+        @reply-show="onReplyClick"
+        ></CommentList>
+        <!-- 评论区 -->
+        <!-- 留言板弹出层 -->
+        <van-popup v-model="isPopShow" position="bottom">
+          <comment-post
+          :target_id="article.art_id"
+          @update-cmtList="postCmt"
+          ></comment-post>
+        </van-popup>
+        <!-- /留言板弹出层 -->
+        <!-- 底部区域 -->
+    <div class="article-bottom">
+      <van-button
+        class="comment-btn"
+        type="default"
+        round
+        size="small"
+        @click="showPopup"
+      >写评论</van-button>
+      <van-icon
+        name="comment-o"
+        :badge="article.comm_count"
+        color="#777"
+      />
+      <Collect-Star
+      v-model="article.is_collected"
+      :art_id="article.art_id"
+      />
+      <!-- <van-icon
+        color="#777"
+        name="star-o"
+      /> -->
+      <Like
+      v-model="article.attitude"
+      :art_id="article.art_id"
+      ></Like>
+      <!-- <van-icon
+        color="#777"
+        name="good-job-o"
+      /> -->
+      <van-icon name="share" color="#777777"></van-icon>
+    </div>
+    <!-- /底部区域 -->
       </div>
       <!-- /加载完成-文章详情 -->
 
@@ -73,39 +134,44 @@
       </div>
       <!-- /加载失败：其它未知错误（例如网络原因或服务端异常） -->
     </div>
-
-    <!-- 底部区域 -->
-    <div class="article-bottom">
-      <van-button
-        class="comment-btn"
-        type="default"
-        round
-        size="small"
-      >写评论</van-button>
-      <van-icon
-        name="comment-o"
-        badge="123"
-        color="#777"
-      />
-      <van-icon
-        color="#777"
-        name="star-o"
-      />
-      <van-icon
-        color="#777"
-        name="good-job-o"
-      />
-      <van-icon name="share" color="#777777"></van-icon>
-    </div>
-    <!-- /底部区域 -->
+    <!-- 评论de回复 -->
+    <!-- popup弹出层是懒渲染，只有第一次打开时会更新里面的内容，以后只有关闭和弹出功能 -->
+        <van-popup
+          v-model="isReplyShow"
+          position="bottom"
+          style="height: 100%"
+        >
+        <!-- 用v-if解决pop弹出层懒加载的问题,随着pop弹层的出现重新渲染一次内部组件 -->
+          <comment-reply
+          v-if="isReplyShow"
+          :currentComment = "currentComment"
+          @closeReply="isReplyShow=false"
+          ></comment-reply>
+        </van-popup>
+        <!-- /评论de回复    -->
   </div>
 </template>
 
 <script>
 import { getArticleItem } from '@/api/article'
+import { ImagePreview } from 'vant'
+import FollowUser from '@/components/follow-user-btn'
+import CollectStar from '@/components/collect-star'
+import Like from '@/components/like'
+import CommentList from './components/comments-list'
+import CommentPost from './components/CmtPost.vue'
+import CommentReply from './components/CmtReply.vue'
 export default {
   name: 'ArticleIndex',
-  components: {},
+  components: {
+    [ImagePreview.Component.name]: ImagePreview.Component,
+    FollowUser,
+    CollectStar,
+    Like,
+    CommentList,
+    CommentPost,
+    CommentReply
+  },
   props: {
     articleId: {
       // 接收每篇文章的id数据，提高复用性，需要在router中设置props ：true，开启路由传参
@@ -117,7 +183,11 @@ export default {
     return {
       article: {},
       isLoading: true, // 控制加载中是否出现
-      errorStatus: 0// 控制错误类型
+      errorStatus: 0, // 控制错误类型
+      isPopShow: false, // 文章评论弹层
+      commentList: [], // 文章评论列表
+      isReplyShow: false, // 回复评论弹层
+      currentComment: {} // 当前评论项
     }
   },
   computed: {},
@@ -135,9 +205,13 @@ export default {
         //   JSON.parse('dscghdsrg')
         // }
         const { data } = await getArticleItem(this.articleId)
-        console.log(data)
+        // console.log(data)
         this.article = data.data
         this.isLoading = false
+        // 加载文章数据成功后，获取article.content中的image节点
+        setTimeout(() => {
+          this.previewImage()
+        }, 0)
       } catch (error) {
         console.log(error)
         this.isLoading = false
@@ -145,12 +219,50 @@ export default {
           this.errorStatus = 404
         }
       }
+    },
+    previewImage () {
+      // 拿到article.content内容
+      const articleContent = this.$refs['article-content']
+      // 获取所有的img节点
+      const imgs = articleContent.querySelectorAll('img')
+      // 获取每张图片地址并给图片添加点击事件
+      const imgUrl = []
+      imgs.forEach((img, index) => {
+        imgUrl.push(img.src)
+        img.onclick = () => {
+          ImagePreview({
+            images: imgUrl,
+            // 图片起始位置
+            startPosition: index
+          })
+        }
+      })
+      // console.log(imgUrl)
+    },
+    showPopup () {
+      // 控制留言板的弹出
+      this.isPopShow = true
+    },
+    postCmt (e) {
+      // 添加新评论
+      this.commentList.unshift(e.new_obj)
+      // 关闭弹出层
+      this.isPopShow = false
+      // 更新视图
+      this.article.comm_count++
+    },
+    onReplyClick (comment) {
+      // 关于互评弹出层
+      this.isReplyShow = true
+      // console.log(comment) comment是子组件CmtItem发送过来的当前评论项的数据
+      this.currentComment = comment
     }
   }
 }
 </script>
 
 <style scoped lang="less">
+@import './github-markdown.css';
 .article-container {
   .main-wrap {
     position: fixed;
@@ -262,6 +374,9 @@ export default {
         background-color: #e22829;
       }
     }
+  }
+  /deep/ .van-nav-bar .van-icon{
+    color:#fff;
   }
 }
 </style>

@@ -47,6 +47,11 @@ const routes = [
     name: 'article',
     component: () => import('@/views/article'),
     props: true // 开启路由传参（:articleId），页面跟随路由跳转过去后把articleId也带过去
+  },
+  {
+    name: 'user-profile',
+    path: '/user/profile',
+    component: () => import('@/views/user-profile')
   }
 ]
 
